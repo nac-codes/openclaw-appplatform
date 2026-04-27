@@ -1,0 +1,57 @@
+#!/command/with-contenv bash
+# Install gogcli (Google One Gateway) for Gmail/Calendar/Contacts access.
+# Pins a specific release; idempotent — skips download if version already installed.
+# Sets keyring backend to "file" since this is a headless container (no GNOME secret-service).
+
+set -euo pipefail
+
+GOG_VERSION="0.13.0"
+GOG_BIN="/usr/local/bin/gog"
+
+current_version=""
+if [ -x "$GOG_BIN" ]; then
+  current_version="$("$GOG_BIN" --version 2>/dev/null | awk '{print $1}' | tr -d 'v' || true)"
+fi
+
+if [ "$current_version" = "$GOG_VERSION" ]; then
+  echo "[install-gog] gog v${GOG_VERSION} already installed at ${GOG_BIN}"
+else
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) gog_arch="amd64" ;;
+    aarch64|arm64) gog_arch="arm64" ;;
+    *) echo "[install-gog] ERROR: unsupported arch $arch" >&2; exit 1 ;;
+  esac
+
+  url="https://github.com/steipete/gogcli/releases/download/v${GOG_VERSION}/gogcli_${GOG_VERSION}_linux_${gog_arch}.tar.gz"
+  tmpdir="$(mktemp -d)"
+  trap 'rm -rf "$tmpdir"' EXIT
+
+  echo "[install-gog] Downloading gog v${GOG_VERSION} (${gog_arch}) from $url"
+  curl -fsSL --retry 3 --retry-delay 2 -o "$tmpdir/gog.tar.gz" "$url"
+  tar -xzf "$tmpdir/gog.tar.gz" -C "$tmpdir"
+
+  # Locate the binary inside the archive
+  src="$(find "$tmpdir" -type f -name 'gog' -perm -u+x | head -n 1)"
+  if [ -z "$src" ]; then
+    echo "[install-gog] ERROR: gog binary not found in archive" >&2
+    ls -la "$tmpdir"
+    exit 1
+  fi
+
+  install -m 0755 "$src" "$GOG_BIN"
+  echo "[install-gog] Installed gog v${GOG_VERSION} -> ${GOG_BIN}"
+fi
+
+# Ensure credentials directory exists (where client_secret.json is uploaded).
+GOOGLE_CRED_DIR="/data/.openclaw/credentials/google"
+mkdir -p "$GOOGLE_CRED_DIR"
+chown -R openclaw:openclaw "$GOOGLE_CRED_DIR"
+chmod 700 "$GOOGLE_CRED_DIR"
+
+# Set keyring backend to "file" for the openclaw user (headless container).
+# Idempotent — gog auth keyring is safe to re-run.
+sudo -u openclaw bash -lc 'gog auth keyring file' >/dev/null 2>&1 || \
+  echo "[install-gog] WARNING: failed to set keyring backend (will retry on next boot)"
+
+echo "[install-gog] Done"
