@@ -1,7 +1,7 @@
 #!/command/with-contenv bash
 # Install gogcli (Google One Gateway) for Gmail/Calendar/Contacts access.
 # Pins a specific release; idempotent — skips download if version already installed.
-# Sets keyring backend to "file" since this is a headless container (no GNOME secret-service).
+# Sets keyring passphrase via env so headless invocations don't prompt.
 
 set -euo pipefail
 
@@ -31,7 +31,6 @@ else
   curl -fsSL --retry 3 --retry-delay 2 -o "$tmpdir/gog.tar.gz" "$url"
   tar -xzf "$tmpdir/gog.tar.gz" -C "$tmpdir"
 
-  # Locate the binary inside the archive
   src="$(find "$tmpdir" -type f -name 'gog' -perm -u+x | head -n 1)"
   if [ -z "$src" ]; then
     echo "[install-gog] ERROR: gog binary not found in archive" >&2
@@ -43,15 +42,49 @@ else
   echo "[install-gog] Installed gog v${GOG_VERSION} -> ${GOG_BIN}"
 fi
 
-# Ensure credentials directory exists (where client_secret.json is uploaded).
+# Ensure credentials directory exists.
 GOOGLE_CRED_DIR="/data/.openclaw/credentials/google"
 mkdir -p "$GOOGLE_CRED_DIR"
 chown -R openclaw:openclaw "$GOOGLE_CRED_DIR"
 chmod 700 "$GOOGLE_CRED_DIR"
 
-# Set keyring backend to "file" for the openclaw user (headless container).
-# Idempotent — gog auth keyring is safe to re-run.
+# Wire GOG_KEYRING_PASSWORD into the openclaw user's profile so every shell
+# (interactive admin sessions and the runuser-launched gateway service) inherits it.
+# Without this, gog file backend prompts for a TTY passphrase on each invocation.
+PROFILE=/home/openclaw/.profile
+touch "$PROFILE"
+chown openclaw:openclaw "$PROFILE"
+
+if [ -n "${GOG_KEYRING_PASSWORD:-}" ]; then
+  if ! grep -q '^export GOG_KEYRING_PASSWORD=' "$PROFILE" 2>/dev/null; then
+    {
+      echo ''
+      echo '# gog keyring (headless, non-interactive)'
+      echo 'export GOG_KEYRING_BACKEND=file'
+      echo "export GOG_KEYRING_PASSWORD='${GOG_KEYRING_PASSWORD}'"
+    } >> "$PROFILE"
+    echo "[install-gog] Wrote GOG_KEYRING_PASSWORD to $PROFILE"
+  fi
+
+  # Detect orphaned keyring files written with a stale/random passphrase.
+  # Symptom: gog auth list fails with aes.KeyUnwrap integrity check failed.
+  # Recovery: wipe the keyring directory; tokens are unrecoverable anyway.
+  KR_DIR=/home/openclaw/.config/gogcli/keyring
+  if [ -d "$KR_DIR" ] && [ -n "$(ls -A "$KR_DIR" 2>/dev/null)" ]; then
+    if ! sudo -u openclaw bash -lc 'gog auth list >/dev/null 2>&1'; then
+      echo "[install-gog] Detected unreadable keyring at $KR_DIR; wiping (tokens lost)"
+      rm -rf "$KR_DIR"
+      mkdir -p "$KR_DIR"
+      chown -R openclaw:openclaw "/home/openclaw/.config/gogcli"
+      chmod 700 "$KR_DIR"
+    fi
+  fi
+else
+  echo "[install-gog] WARNING: GOG_KEYRING_PASSWORD not set; gog will prompt for TTY passphrase"
+fi
+
+# Set keyring backend to file (idempotent).
 sudo -u openclaw bash -lc 'gog auth keyring file' >/dev/null 2>&1 || \
-  echo "[install-gog] WARNING: failed to set keyring backend (will retry on next boot)"
+  echo "[install-gog] WARNING: failed to set keyring backend"
 
 echo "[install-gog] Done"
