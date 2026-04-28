@@ -33,7 +33,7 @@ workers:
       # TS_EXTRA_ARGS=--ssh enables Tailscale SSH (admin shells via tailnet)
       # ============================================================
       - {key: TS_AUTHKEY, scope: RUN_TIME, type: SECRET}
-      - {key: TS_EXTRA_ARGS, scope: RUN_TIME, value: "--ssh"}
+      - {key: TS_EXTRA_ARGS, scope: RUN_TIME, value: "--operator=openclaw --accept-dns=false --ssh --reset"}
 
       # ============================================================
       # DO SPACES — persistence (refresh tokens, agent memory, telegram allowlist)
