@@ -50,6 +50,7 @@ RUN set -eux; \
   git \
   bzip2 \
   openssh-server \
+  rsync \
   cron \
   build-essential \
   procps \
