@@ -6,7 +6,7 @@ workers:
     dockerfile_path: /Dockerfile
     source_dir: /
     instance_count: 1
-    instance_size_slug: apps-s-1vcpu-2gb # 2GB minimum (heap)
+    instance_size_slug: apps-s-1vcpu-4gb # bumped from 2gb after repeated OOM kills during agent runs (gpt-5.4 reasoning + restic + tailscale + node V8 spikes saturated 2gb)
     github:
       branch: main
       # Point this at the user's fork once forked.
